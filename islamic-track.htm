@@ -596,38 +596,50 @@
 </div>
 
 <script>
-// --- 1. CORE VARIABLES ---
-const API_URL = "https://script.google.com/macros/s/AKfycbxbIEc1gL2lpJdNT9ZuRRdWTV2UZYWgvOfjuLFelsuk6xX08rJAAc4j8H5fA3rIRanJ/exec"; 
-let currentUserEmail = "";
-let currentUnlockedWeek = 1; 
-let currentUnlockedDay = 1;  
-let currentViewDay = 1;
+// ==========================================
+// 1. CONSTANTS
+// ==========================================
+const API_URL = "https://script.google.com/macros/s/AKfycbxbIEc1gL2lpJdNT9ZuRRdWTV2UZYWgvOfjuLFelsuk6xX08rJAAc4j8H5fA3rIRanJ/exec";
 
-const progressState = {};
-for(let i=1; i<=12; i++) {
-  progressState[i] = { doc: false, log: false, peer: false, viva: false };
-}
+// ==========================================
+// 2. GLOBAL STATE
+// ==========================================
+let currentUserEmail = "";
+let currentUnlockedDay = 1; 
+let currentViewDay = 1;
 
 let pendingUploadDocType = "";
 let pendingUploadDay = 1;
 let pendingIsMulti = false;
 
-// --- 2. AUTHENTICATION ---
+const localProgress = {};
+for (let i = 1; i <= 12; i++) {
+  localProgress[i] = { doc: false, log: false, peer: false, viva: false };
+}
+
+// ==========================================
+// 3. AUTHENTICATION
+// ==========================================
 function authenticate() {
-  const email = document.getElementById('login-email').value.trim();
+  const emailInput = document.getElementById('login-email');
+  if (!emailInput) return;
+  const email = emailInput.value.trim();
+  if (!email) return;
+
   const btn = document.getElementById('login-btn');
   const err = document.getElementById('login-error');
-  if(!email) return;
   
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Authenticating...';
-  btn.disabled = true; err.style.display = 'none';
+  btn.disabled = true;
+  if (err) err.style.display = 'none';
 
+  // REAL API CALL
   fetch(`${API_URL}?action=verify&email=${encodeURIComponent(email)}`)
     .then(res => res.json())
     .then(data => {
       if(data.ok) {
         currentUserEmail = email;
-        currentUnlockedWeek = data.progress.currentWeek || 1;
+        let currentUnlockedWeek = data.progress.currentWeek || 1;
         
         if (currentUnlockedWeek === 2) currentUnlockedDay = 4;
         if (currentUnlockedWeek === 3) currentUnlockedDay = 7;
@@ -636,202 +648,419 @@ function authenticate() {
 
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('dashboard').style.display = 'flex';
-        document.getElementById('user-initial').innerText = email.charAt(0).toUpperCase();
-        document.getElementById('user-name').innerText = data.name || email.split('@')[0];
-        document.getElementById('cert-email').innerText = email;
+        
+        const userInitial = document.getElementById('user-initial');
+        const userName = document.getElementById('user-name');
+        const certEmail = document.getElementById('cert-email');
+        
+        if (userInitial) userInitial.innerText = email.charAt(0).toUpperCase();
+        if (userName) userName.innerText = data.name || email.split('@')[0];
+        if (certEmail) certEmail.innerText = email;
         
         renderSidebar();
-        loadDay(currentUnlockedDay); 
+        loadDay(currentUnlockedDay);
+        updateDashboardWidget();
       } else {
-        err.innerText = data.error; err.style.display = 'block';
-        btn.innerHTML = 'Enter Campus <i class="fas fa-arrow-right"></i>'; btn.disabled = false;
+        if (err) {
+          err.innerText = data.error || 'Access Denied.';
+          err.style.display = 'block';
+        }
+        btn.innerHTML = 'Enter Campus <i class="fas fa-arrow-right"></i>';
+        btn.disabled = false;
       }
     })
     .catch(error => {
-      err.innerText = "Connection failed. Please try again."; err.style.display = 'block'; btn.disabled = false;
+      if (err) {
+        err.innerText = "Connection failed. Please try again."; 
+        err.style.display = 'block'; 
+      }
+      btn.innerHTML = 'Enter Campus <i class="fas fa-arrow-right"></i>';
+      btn.disabled = false;
     });
 }
 
-// --- 3. SIDEBAR & DASHBOARD RENDER ---
+// ==========================================
+// 4. UI RENDERING
+// ==========================================
 function renderSidebar() {
   const nav = document.getElementById('sidebar-nav');
+  if (!nav) return;
   nav.innerHTML = '';
-  const dayTitles = ["Arrival & Synthesis", "Features of Malabar", "Climate & Materials", "Woodwork & Craft", "Calligraphy", "Field Prep", "Field Visit", "Spatial Layouts", "Conservation", "Peer Review", "Final Assembly", "Presentation & Viva"];
+  
+  const dayTitles = [
+    "Arrival & Synthesis", "Features of Malabar", "Climate & Materials",
+    "Woodwork & Craft", "Calligraphy", "Field Prep", "Field Visit",
+    "Spatial Layouts", "Conservation", "Peer Review", "Final Assembly", "Presentation & Viva"
+  ];
 
-  for(let i=1; i<=12; i++) {
+  for (let i = 1; i <= 12; i++) {
     let isLocked = i > currentUnlockedDay;
     let isActive = i === currentViewDay;
     let stateClass = isActive ? 'active' : (isLocked ? 'locked' : '');
-    let icon = isLocked ? '<i class="fas fa-lock"></i>' : (i < 10 ? '0'+i : i);
-    nav.innerHTML += `<div class="nav-item ${stateClass}" ${!isLocked ? `onclick="loadDay(${i})"` : ''}><div class="day-num">${icon}</div>Day ${i}: ${dayTitles[i-1]}</div>`;
+    let icon = isLocked ? '<i class="fas fa-lock"></i>' : (i < 10 ? '0' + i : i);
+    
+    nav.innerHTML += `
+      <div class="nav-item ${stateClass}" ${!isLocked ? `onclick="loadDay(${i})"` : ''}>
+        <div class="day-num">${icon}</div>
+        Day ${i}: ${dayTitles[i-1] || 'Module'}
+      </div>
+    `;
   }
   
   let percentage = Math.round(((currentUnlockedDay - 1) / 12) * 100);
-  if (progressState[12] && progressState[12].viva) percentage = 100;
+  if (localProgress[12] && localProgress[12].viva) percentage = 100;
   
-  document.getElementById('progress-text').innerText = percentage + "%";
-  document.getElementById('progress-fill').style.width = percentage + "%";
+  const progressText = document.getElementById('progress-text');
+  const progressFill = document.getElementById('progress-fill');
+  if (progressText) progressText.innerText = percentage + "%";
+  if (progressFill) progressFill.style.width = percentage + "%";
 }
 
 function updateDashboardWidget() {
-  document.getElementById('dash-user-name').innerText = document.getElementById('user-name').innerText;
-  document.getElementById('dash-current-day').innerText = currentUnlockedDay;
-  let percentage = Math.round(((currentUnlockedDay - 1) / 12) * 100);
-  if (progressState[12] && progressState[12].viva) percentage = 100;
+  const dashUserName = document.getElementById('dash-user-name');
+  const dashCurrentDay = document.getElementById('dash-current-day');
+  const userNameElem = document.getElementById('user-name');
   
-  document.getElementById('dash-progress-text').innerText = percentage + '%';
-  document.getElementById('dash-progress-circle').setAttribute('stroke-dasharray', `${percentage}, 100`);
+  if (dashUserName && userNameElem) dashUserName.innerText = userNameElem.innerText;
+  if (dashCurrentDay) dashCurrentDay.innerText = currentUnlockedDay;
+  
+  let percentage = Math.round(((currentUnlockedDay - 1) / 12) * 100);
+  if (localProgress[12] && localProgress[12].viva) percentage = 100;
+  
+  const dashProgText = document.getElementById('dash-progress-text');
+  const dashProgCircle = document.getElementById('dash-progress-circle');
+  if (dashProgText) dashProgText.innerText = percentage + '%';
+  if (dashProgCircle) dashProgCircle.setAttribute('stroke-dasharray', `${percentage}, 100`);
 
-  const dayData = progressState[currentUnlockedDay] || { doc: false, log: false, peer: false, viva: false };
   const tasksList = document.getElementById('dash-pending-tasks');
+  if (!tasksList) return;
+  
+  const dayData = localProgress[currentUnlockedDay];
   tasksList.innerHTML = '';
 
   if (currentUnlockedDay === 12) {
-     if(!dayData.viva) tasksList.innerHTML += `<li><i class="far fa-circle" style="color:var(--gold); margin-right:8px;"></i> Mark Viva Complete</li>`;
-     else tasksList.innerHTML += `<li><i class="fas fa-check-circle" style="color:var(--mint); margin-right:8px;"></i> Course Completed!</li>`;
+     if (!dayData.viva) {
+       tasksList.innerHTML += `<li><i class="far fa-circle" style="color:var(--gold); margin-right:8px;"></i> Mark Viva Complete</li>`;
+     } else {
+       tasksList.innerHTML += `<li><i class="fas fa-check-circle" style="color:var(--mint); margin-right:8px;"></i> Course Completed!</li>`;
+     }
   } else {
-     if(!dayData.doc) tasksList.innerHTML += `<li><i class="far fa-circle" style="color:var(--gold); margin-right:8px;"></i> Complete & Upload Practical Task</li>`;
+     if (!dayData.doc) tasksList.innerHTML += `<li><i class="far fa-circle" style="color:var(--gold); margin-right:8px;"></i> Complete & Upload Practical Task</li>`;
      else tasksList.innerHTML += `<li><i class="fas fa-check-circle" style="color:var(--mint); margin-right:8px;"></i> Task Uploaded</li>`;
 
-     if(!dayData.log) tasksList.innerHTML += `<li><i class="far fa-circle" style="color:var(--gold); margin-right:8px;"></i> Submit Daily Logbook</li>`;
+     if (!dayData.log) tasksList.innerHTML += `<li><i class="far fa-circle" style="color:var(--gold); margin-right:8px;"></i> Submit Daily Logbook Reflection</li>`;
      else tasksList.innerHTML += `<li><i class="fas fa-check-circle" style="color:var(--mint); margin-right:8px;"></i> Logbook Submitted</li>`;
 
-     if(currentUnlockedDay === 10) {
-        if(!dayData.peer) tasksList.innerHTML += `<li><i class="far fa-circle" style="color:var(--gold); margin-right:8px;"></i> Complete Peer Review</li>`;
+     if (currentUnlockedDay === 10) {
+        if (!dayData.peer) tasksList.innerHTML += `<li><i class="far fa-circle" style="color:var(--gold); margin-right:8px;"></i> Complete Double-Blind Peer Review</li>`;
         else tasksList.innerHTML += `<li><i class="fas fa-check-circle" style="color:var(--mint); margin-right:8px;"></i> Peer Review Done</li>`;
      }
   }
 }
 
-// --- 4. LOAD DAY FUNCTION ---
 function loadDay(dayNumber) {
   if (dayNumber > currentUnlockedDay) {
-    alert(`🔒 Access Denied: Complete Day ${currentUnlockedDay} before accessing Day ${dayNumber}.`);
+    alert(`🔒 Access Denied: Please complete Day ${currentUnlockedDay} before proceeding.`);
     return; 
   }
+  
   currentViewDay = dayNumber;
   document.querySelectorAll('.day-module').forEach(el => el.style.display = 'none');
+  
   const targetDay = document.getElementById('day-' + dayNumber);
-  if(targetDay) targetDay.style.display = 'flex';
+  if (targetDay) targetDay.style.display = 'flex';
+  
   renderSidebar(); 
   updateDashboardWidget();
 }
 
-// --- 5. UPLOAD LOGIC ---
+// ==========================================
+// 5. LMS ACTIONS
+// ==========================================
 function uploadDocument(docType, day, isMulti = false) {
   pendingUploadDocType = docType;
   pendingUploadDay = day;
   pendingIsMulti = isMulti;
-  if(isMulti) document.getElementById('multi-doc-upload').click();
-  else document.getElementById('global-doc-upload').click();
+  
+  if (isMulti) {
+    document.getElementById('multi-doc-upload').click();
+  } else {
+    document.getElementById('global-doc-upload').click();
+  }
 }
 
 function processUpload(input) {
   if (!input.files || input.files.length === 0) return;
-  const btn = document.getElementById(`btn-up-${pendingUploadDay}`);
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Securing Data...';
-  btn.disabled = true;
-
-  const file = input.files[0];
-  const reader = new FileReader();
   
-  reader.onload = function(e) {
-    const base64Data = e.target.result.split(',')[1]; 
-    const payload = { action: 'upload_doc', email: currentUserEmail, docType: pendingUploadDocType, fileName: file.name, mimeType: file.type, base64: base64Data };
+  const btn = document.getElementById(`btn-up-${pendingUploadDay}`);
+  if (btn) {
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+    btn.disabled = true;
+  }
 
-    fetch(API_URL, { method: "POST", body: JSON.stringify(payload) })
-      .then(res => res.json())
-      .then(data => {
-        if(data.ok) {
-          btn.innerHTML = '<i class="fas fa-check-circle"></i> Uploaded';
-          btn.style.background = 'var(--forest)'; btn.style.color = 'white'; btn.style.borderColor = 'var(--forest)';
-          
-          const previewContainer = document.getElementById(`preview-d${pendingUploadDay}`);
-          if (previewContainer) {
-            previewContainer.style.display = 'flex';
-            if(pendingIsMulti) {
-              const imgContainer = document.getElementById(`multi-preview-container-${pendingUploadDay}`);
-              if(imgContainer) {
+  // REAL API CALL
+  const files = pendingIsMulti ? Array.from(input.files).slice(0, 5) : [input.files[0]];
+  const uploadPromises = files.map(file => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const base64Data = e.target.result.split(',')[1];
+        const payload = { action: 'upload_doc', email: currentUserEmail, docType: pendingUploadDocType, fileName: file.name, mimeType: file.type, base64: base64Data };
+        fetch(API_URL, { method: "POST", body: JSON.stringify(payload) })
+          .then(res => res.json())
+          .then(data => {
+            if (data.ok) resolve({file: file, result: e.target.result, data: data});
+            else reject(data.error || "Upload failed.");
+          }).catch(reject);
+      };
+      reader.readAsDataURL(file);
+    });
+  });
+
+  Promise.all(uploadPromises)
+    .then(results => {
+       if (btn) {
+          const msg = pendingIsMulti ? `${results.length} Assets Uploaded` : 'Uploaded';
+          btn.innerHTML = `<i class="fas fa-check-circle"></i> ${msg}`;
+          btn.style.background = 'var(--forest)';
+          btn.style.color = 'white';
+          btn.style.borderColor = 'var(--forest)';
+       }
+
+       const previewContainer = document.getElementById(`preview-d${pendingUploadDay}`);
+       if (previewContainer) {
+          previewContainer.style.display = 'flex';
+          if (pendingIsMulti) {
+             const imgContainer = document.getElementById(`multi-preview-container-${pendingUploadDay}`);
+             if (imgContainer) {
                 imgContainer.innerHTML = '';
-                Array.from(input.files).slice(0, 5).forEach(f => {
-                  const r = new FileReader();
-                  r.onload = function(evt) { imgContainer.innerHTML += `<img src="${evt.target.result}" style="width:64px; height:64px; object-fit:cover; border-radius:8px; border:2px solid var(--gold);">`; };
-                  r.readAsDataURL(f);
+                results.forEach(r => {
+                   imgContainer.innerHTML += `<img src="${r.result}" style="width:64px; height:64px; object-fit:cover; border-radius:8px; border:2px solid var(--gold);">`;
                 });
-              }
-            } else {
-              const imgPreview = document.getElementById(`img-preview-${pendingUploadDay}`);
-              const fileNameDiv = document.getElementById(`file-name-${pendingUploadDay}`);
-              if (file.type.startsWith('image/') && imgPreview) { imgPreview.src = e.target.result; imgPreview.style.display = 'block'; }
-              if (fileNameDiv) fileNameDiv.innerHTML = `<i class="fas fa-file-check"></i> ${file.name}`;
-            }
+             }
+          } else {
+             const r = results[0];
+             const imgPreview = document.getElementById(`img-preview-${pendingUploadDay}`);
+             const fileNameDiv = document.getElementById(`file-name-${pendingUploadDay}`);
+             if (r.file.type.startsWith('image/') && imgPreview) {
+                imgPreview.src = r.result;
+                imgPreview.style.display = 'block';
+             }
+             if (fileNameDiv) fileNameDiv.innerHTML = `<i class="fas fa-file-check"></i> ${r.file.name}`;
           }
-          progressState[pendingUploadDay].doc = true;
-          validateDay(pendingUploadDay);
-        } else {
-          alert("Upload failed: " + data.error);
-          btn.innerHTML = '<i class="fas fa-upload"></i> Try Again'; btn.disabled = false;
-        }
-        input.value = ''; 
-      });
-  };
-  reader.readAsDataURL(file);
-}
-
-// Day 9 Specific (Text Upload)
-function updateWordCount(day) {
-  const text = document.getElementById(`report-text-${day}`).value.trim();
-  const words = text ? text.split(/\s+/).length : 0;
-  const countSpan = document.getElementById(`word-count-${day}`);
-  const btn = document.getElementById(`btn-up-${day}`);
-  countSpan.innerText = words;
-  if (words >= 200) { countSpan.style.color = "var(--mint)"; btn.disabled = false; btn.style.opacity = "1"; btn.style.cursor = "pointer"; btn.classList.add("btn-outline"); } 
-  else { countSpan.style.color = "var(--gold)"; btn.disabled = true; btn.style.opacity = "0.5"; btn.style.cursor = "not-allowed"; }
-}
-
-function submitTextReport(day) {
-  const btn = document.getElementById(`btn-up-${day}`);
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Securing Data...';
-  btn.disabled = true; document.getElementById(`report-text-${day}`).disabled = true;
-
-  const payload = { action: 'upload_doc', email: currentUserEmail, docType: 'W3_REPORT', fileName: 'Analytical_Report.txt', mimeType: 'text/plain', base64: btoa(document.getElementById(`report-text-${day}`).value) };
-  fetch(API_URL, { method: "POST", body: JSON.stringify(payload) })
-    .then(res => res.json())
-    .then(data => {
-      if(data.ok) {
-        btn.innerHTML = '<i class="fas fa-check-circle"></i> Report Verified';
-        btn.style.background = 'var(--forest)'; btn.style.color = 'white'; btn.style.borderColor = 'var(--forest)';
-        progressState[day].doc = true; validateDay(day);
-      }
+       }
+       
+       localProgress[pendingUploadDay].doc = true;
+       validateDay(pendingUploadDay);
+       input.value = '';
+    })
+    .catch(err => {
+       alert("Upload error: " + err);
+       if (btn) { btn.innerHTML = '<i class="fas fa-upload"></i> Try Again'; btn.disabled = false; }
+       input.value = '';
     });
 }
 
-// --- 6. LOG SUBMISSION ---
-function submitLog(weekMapped, day) {
+function submitLog(week, day) {
   const logContent = prompt(`Submit your reflection for Day ${day}:`);
   if (!logContent) return;
 
   const btn = document.getElementById(`btn-log-${day}`);
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...'; btn.disabled = true;
+  if (btn) {
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+    btn.disabled = true;
+  }
 
-  fetch(`${API_URL}?action=log_progress&email=${encodeURIComponent(currentUserEmail)}&week=${weekMapped}&day=${day}&content=${encodeURIComponent(logContent)}`)
+  // REAL API CALL
+  fetch(`${API_URL}?action=log_progress&email=${encodeURIComponent(currentUserEmail)}&week=${week}&day=${day}&content=${encodeURIComponent(logContent)}`)
     .then(res => res.json())
     .then(data => {
-      if(data.ok) {
-        btn.innerHTML = '<i class="fas fa-check-circle"></i> Log Submitted';
-        btn.style.background = 'var(--forest)'; btn.style.borderColor = 'var(--forest)';
-        progressState[day].log = true; validateDay(day);
-      } else {
-        alert("Log failed: " + data.error); btn.innerHTML = '<i class="fas fa-pen"></i> Try Again'; btn.disabled = false;
-      }
+        if(data.ok) {
+            if (btn) {
+              btn.innerHTML = '<i class="fas fa-check-circle"></i> Log Submitted';
+              btn.style.background = 'var(--forest)';
+              btn.style.color = 'white';
+              btn.style.borderColor = 'var(--forest)';
+            }
+            localProgress[day].log = true;
+            validateDay(day);
+        } else {
+            alert("Log failed: " + data.error);
+            if (btn) { btn.innerHTML = '<i class="fas fa-pen"></i> Try Again'; btn.disabled = false; }
+        }
+    })
+    .catch(err => {
+        alert("Connection error.");
+        if (btn) { btn.innerHTML = '<i class="fas fa-pen"></i> Try Again'; btn.disabled = false; }
     });
 }
 
-// --- 7. VALIDATION + UNLOCK ---
+// Special Actions: Day 9 Text Report
+function updateWordCount(day) {
+  const textArea = document.getElementById(`report-text-${day}`);
+  if (!textArea) return;
+  const text = textArea.value.trim();
+  const words = text ? text.split(/\s+/).length : 0;
+  const countSpan = document.getElementById(`word-count-${day}`);
+  const btn = document.getElementById(`btn-up-${day}`);
+  
+  if (countSpan) countSpan.innerText = words;
+  
+  if (words >= 200) { 
+    if (countSpan) countSpan.style.color = "var(--mint)"; 
+    if (btn) {
+      btn.disabled = false; 
+      btn.style.opacity = "1"; 
+      btn.style.cursor = "pointer"; 
+      btn.classList.add("btn-outline");
+    }
+  } else { 
+    if (countSpan) countSpan.style.color = "var(--gold)"; 
+    if (btn) {
+      btn.disabled = true; 
+      btn.style.opacity = "0.5"; 
+      btn.style.cursor = "not-allowed";
+    }
+  }
+}
+
+function submitTextReport(day) {
+  const btn = document.getElementById(`btn-up-${day}`);
+  const textArea = document.getElementById(`report-text-${day}`);
+  
+  if (btn) {
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...'; 
+    btn.disabled = true; 
+  }
+  if (textArea) textArea.disabled = true;
+
+  // REAL API CALL
+  const content = textArea ? textArea.value : '';
+  const payload = { 
+    action: 'upload_doc', 
+    email: currentUserEmail, 
+    docType: 'W3_REPORT', 
+    fileName: 'Analytical_Report.txt', 
+    mimeType: 'text/plain', 
+    base64: btoa(unescape(encodeURIComponent(content))) 
+  };
+
+  fetch(API_URL, { method: "POST", body: JSON.stringify(payload) })
+    .then(res => res.json())
+    .then(data => {
+        if(data.ok) {
+            if (btn) {
+              btn.innerHTML = '<i class="fas fa-check-circle"></i> Report Verified'; 
+              btn.style.background = 'var(--forest)'; 
+              btn.style.color = 'white'; 
+              btn.style.borderColor = 'var(--forest)';
+            }
+            localProgress[day].doc = true; 
+            validateDay(day);
+        } else {
+            alert("Submission failed: " + data.error);
+            if (btn) { btn.innerHTML = '<i class="fas fa-paper-plane"></i> Try Again'; btn.disabled = false; }
+            if (textArea) textArea.disabled = false;
+        }
+    }).catch(err => {
+        alert("Connection error.");
+        if (btn) { btn.innerHTML = '<i class="fas fa-paper-plane"></i> Try Again'; btn.disabled = false; }
+        if (textArea) textArea.disabled = false;
+    });
+}
+
+// Special Actions: Day 10 Peer Review
+function openPeerReviewModal() { 
+  const modal = document.getElementById('peer-review-modal');
+  if (modal) modal.style.display = 'flex'; 
+}
+
+function closePeerReviewModal() { 
+  const modal = document.getElementById('peer-review-modal');
+  if (modal) modal.style.display = 'none'; 
+}
+
+function submitPeerReview() {
+  const ratingInput = document.getElementById('peer-rating');
+  const feedbackInput = document.getElementById('peer-feedback');
+  if (!ratingInput || !feedbackInput) return;
+  
+  const rating = ratingInput.value;
+  const feedback = feedbackInput.value;
+  if (!rating || !feedback) { 
+    alert("Please provide a rating and feedback."); 
+    return; 
+  }
+  
+  const btn = document.getElementById('btn-submit-peer');
+  if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+  
+  // REAL API CALL
+  fetch(`${API_URL}?action=peer_review&email=${encodeURIComponent(currentUserEmail)}&rating=${rating}&feedback=${encodeURIComponent(feedback)}`)
+    .then(res => res.json())
+    .then(data => {
+        if(data.ok) {
+            closePeerReviewModal();
+            const btnPeer = document.getElementById('btn-peer');
+            if (btnPeer) {
+              btnPeer.innerHTML = '<i class="fas fa-check-circle"></i> Review Completed';
+              btnPeer.style.background = 'var(--forest)'; 
+              btnPeer.style.color = 'white'; 
+              btnPeer.style.borderColor = 'var(--forest)'; 
+              btnPeer.disabled = true;
+            }
+            localProgress[10].peer = true; 
+            validateDay(10);
+        } else {
+            alert("Review failed: " + data.error);
+            if (btn) btn.innerHTML = '<i class="fas fa-paper-plane"></i> Submit Review';
+        }
+    }).catch(err => {
+        alert("Connection error.");
+        if (btn) btn.innerHTML = '<i class="fas fa-paper-plane"></i> Submit Review';
+    });
+}
+
+// Special Actions: Day 12 Viva
+function markVivaComplete() {
+  const btn = document.getElementById('btn-viva');
+  if (btn) {
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying...'; 
+    btn.disabled = true;
+  }
+  
+  // REAL API CALL (Using citation_check endpoint mapped to completion layer)
+  fetch(`${API_URL}?action=citation_check&email=${encodeURIComponent(currentUserEmail)}`)
+    .then(res => res.json())
+    .then(data => {
+        if(data.ok) {
+            localProgress[12].viva = true;
+            updateDashboardWidget();
+            const modal = document.getElementById('completion-modal');
+            if (modal) modal.style.display = 'flex';
+        } else {
+            alert("Verification failed: " + data.error);
+            if (btn) { btn.innerHTML = '<i class="fas fa-check-double"></i> Mark Viva Complete'; btn.disabled = false; }
+        }
+    }).catch(err => {
+        alert("Connection error.");
+        if (btn) { btn.innerHTML = '<i class="fas fa-check-double"></i> Mark Viva Complete'; btn.disabled = false; }
+    });
+}
+
+// ==========================================
+// 6. VALIDATION + UNLOCK
+// ==========================================
 function validateDay(day) {
   let isComplete = false;
-  if (day === 10) isComplete = (progressState[day].doc && progressState[day].log && progressState[day].peer); 
-  else isComplete = (progressState[day].doc && progressState[day].log); 
+  
+  if (day === 10) { 
+    isComplete = (localProgress[day].doc && localProgress[day].log && localProgress[day].peer); 
+  } else if (day === 12) {
+    isComplete = localProgress[day].viva;
+  } else { 
+    isComplete = (localProgress[day].doc && localProgress[day].log); 
+  }
 
   if (isComplete) {
     const badge = document.getElementById(`badge-d${day}`);
@@ -847,67 +1076,51 @@ function validateDay(day) {
   }
 }
 
-// Peer Review Specific (Day 10)
-function openPeerReviewModal() { document.getElementById('peer-review-modal').style.display = 'flex'; }
-function closePeerReviewModal() { document.getElementById('peer-review-modal').style.display = 'none'; }
-function submitPeerReview() {
-  const rating = document.getElementById('peer-rating').value;
-  const feedback = document.getElementById('peer-feedback').value;
-  if (!rating || !feedback) { alert("Please provide a rating and feedback."); return; }
-  
-  const btn = document.getElementById('btn-submit-peer');
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
-  
-  fetch(`${API_URL}?action=peer_review&email=${encodeURIComponent(currentUserEmail)}&rating=${rating}&feedback=${encodeURIComponent(feedback)}`)
-    .then(res => res.json())
-    .then(data => {
-      closePeerReviewModal();
-      const btnPeer = document.getElementById('btn-peer');
-      btnPeer.innerHTML = '<i class="fas fa-check-circle"></i> Review Completed';
-      btnPeer.style.background = 'var(--forest)'; btnPeer.style.color = 'white'; btnPeer.style.borderColor = 'var(--forest)'; btnPeer.disabled = true;
-      progressState[10].peer = true; validateDay(10);
-    });
+// ==========================================
+// 7. AI FUNCTIONS
+// ==========================================
+function toggleAI() { 
+  const panel = document.getElementById('ai-panel');
+  if (panel) panel.classList.toggle('open'); 
 }
 
-// Viva Specific (Day 12)
-function markVivaComplete() {
-  const btn = document.getElementById('btn-viva');
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying...'; btn.disabled = true;
-  fetch(`${API_URL}?action=citation_check&email=${encodeURIComponent(currentUserEmail)}`) // Acts as final lock
-    .then(res => res.json())
-    .then(data => {
-      progressState[12].viva = true;
-      updateDashboardWidget();
-      document.getElementById('completion-modal').style.display = 'flex';
-    });
-}
-
-// --- 8. AI PANEL ---
-function toggleAI() { document.getElementById('ai-panel').classList.toggle('open'); }
 function sendPrompt() {
   const input = document.getElementById('ai-prompt');
+  if (!input) return;
   const text = input.value.trim();
-  if(!text) return;
-  const chatBox = document.getElementById('chat-box');
-  chatBox.innerHTML += `<div class="ai-msg-wrap" style="flex-direction:row-reverse;"><div class="ai-av user"><i class="fas fa-user"></i></div><div class="ai-bub user">${text}</div></div>`;
-  input.value = ''; chatBox.scrollTop = chatBox.scrollHeight;
+  if (!text) return;
   
-  const loadId = 'load-' + Date.now();
-  chatBox.innerHTML += `<div class="ai-msg-wrap" id="${loadId}"><div class="ai-av bot"><i class="fas fa-robot"></i></div><div class="ai-bub bot"><i class="fas fa-ellipsis-h fa-fade"></i></div></div>`;
-  chatBox.scrollTop = chatBox.scrollHeight;
+  const chatBox = document.getElementById('chat-box');
+  if (chatBox) {
+    chatBox.innerHTML += `<div class="ai-msg-wrap" style="flex-direction:row-reverse;"><div class="ai-av user"><i class="fas fa-user"></i></div><div class="ai-bub user">${text}</div></div>`;
+    input.value = ''; 
+    chatBox.scrollTop = chatBox.scrollHeight;
+    
+    // Simulate AI loading state
+    const loadId = 'load-' + Date.now();
+    chatBox.innerHTML += `<div class="ai-msg-wrap" id="${loadId}"><div class="ai-av bot"><i class="fas fa-robot"></i></div><div class="ai-bub bot"><i class="fas fa-ellipsis-h fa-fade"></i></div></div>`;
+    chatBox.scrollTop = chatBox.scrollHeight;
 
-  fetch(`${API_URL}?action=chat&email=${encodeURIComponent(currentUserEmail)}&q=${encodeURIComponent(text)}`)
-    .then(res => res.json())
-    .then(data => {
-      document.getElementById(loadId).remove();
-      if(data.ok) {
-        const formattedReply = data.reply.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
-        chatBox.innerHTML += `<div class="ai-msg-wrap"><div class="ai-av bot"><i class="fas fa-robot"></i></div><div class="ai-bub bot">${formattedReply}</div></div>`;
-      } else {
-        chatBox.innerHTML += `<div class="ai-msg-wrap"><div class="ai-av bot"><i class="fas fa-robot"></i></div><div class="ai-bub bot" style="color:#f87171">Connection error.</div></div>`;
-      }
-      chatBox.scrollTop = chatBox.scrollHeight;
-    });
+    // REAL API CALL
+    fetch(`${API_URL}?action=chat&email=${encodeURIComponent(currentUserEmail)}&q=${encodeURIComponent(text)}`)
+        .then(res => res.json())
+        .then(data => {
+          const loader = document.getElementById(loadId);
+          if (loader) loader.remove();
+          if(data.ok) {
+            const formattedReply = data.reply.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+            chatBox.innerHTML += `<div class="ai-msg-wrap"><div class="ai-av bot"><i class="fas fa-robot"></i></div><div class="ai-bub bot">${formattedReply}</div></div>`;
+          } else {
+            chatBox.innerHTML += `<div class="ai-msg-wrap"><div class="ai-av bot"><i class="fas fa-robot"></i></div><div class="ai-bub bot" style="color:#f87171">Connection error: ${data.message || data.error}</div></div>`;
+          }
+          chatBox.scrollTop = chatBox.scrollHeight;
+        }).catch(err => {
+          const loader = document.getElementById(loadId);
+          if (loader) loader.remove();
+          chatBox.innerHTML += `<div class="ai-msg-wrap"><div class="ai-av bot"><i class="fas fa-robot"></i></div><div class="ai-bub bot" style="color:#f87171">Network error.</div></div>`;
+          chatBox.scrollTop = chatBox.scrollHeight;
+        });
+  }
 }
 </script>
 </body>
