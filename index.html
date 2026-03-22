@@ -1538,22 +1538,27 @@ function sendPrompt() {
     input.value = ''; 
     chatBox.scrollTop = chatBox.scrollHeight;
     
-    // Simulate AI loading state
     const loadId = 'load-' + Date.now();
     chatBox.innerHTML += `<div class="ai-msg-wrap" id="${loadId}"><div class="ai-av bot"><i class="fas fa-robot"></i></div><div class="ai-bub bot"><i class="fas fa-ellipsis-h fa-fade"></i></div></div>`;
     chatBox.scrollTop = chatBox.scrollHeight;
 
-    // API CALL (If you have groq enabled, it connects here)
+    // REAL API CALL
     fetch(`${API_URL}?action=chat&email=${encodeURIComponent(currentUserEmail)}&q=${encodeURIComponent(text)}`)
         .then(res => res.json())
         .then(data => {
           const loader = document.getElementById(loadId);
           if (loader) loader.remove();
-          if(data.ok) {
-            const formattedReply = data.reply.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+          
+          if(data.ok && data.reply) {
+            // Clean up the markdown formatting so it doesn't look messy
+            let formattedReply = data.reply
+                .replace(/\n/g, '<br>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>');
+                
             chatBox.innerHTML += `<div class="ai-msg-wrap"><div class="ai-av bot"><i class="fas fa-robot"></i></div><div class="ai-bub bot">${formattedReply}</div></div>`;
           } else {
-            chatBox.innerHTML += `<div class="ai-msg-wrap"><div class="ai-av bot"><i class="fas fa-robot"></i></div><div class="ai-bub bot" style="color:#f87171">Connection error: ${data.message || data.error}</div></div>`;
+            chatBox.innerHTML += `<div class="ai-msg-wrap"><div class="ai-av bot"><i class="fas fa-robot"></i></div><div class="ai-bub bot" style="color:#f87171">Connection error. Please try again.</div></div>`;
           }
           chatBox.scrollTop = chatBox.scrollHeight;
         }).catch(err => {
